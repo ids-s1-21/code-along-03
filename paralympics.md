@@ -10,6 +10,10 @@ library(janitor)
 #installed you'll get an error: try running
 # install.packages("janitor")
 #in the console, then knitting again.
+
+#To install the "emo" package (also necessary to knit this) run:
+# devtools::install_github("hadley/emo")
+#You may need to install the "devtools" package first, in the normal way.
 ```
 
 ## Read data
@@ -45,7 +49,6 @@ codes). So we’ll need to use the lookup tables to add country names.
 oecd_cleaned <- oecd_data %>%
   clean_names() %>%
   select(-c(flag_codes, indicator, frequency)) %>%
-  #mutate(measure = tolower(measure), subject = tolower(subject)) %>%
   pivot_wider(names_from = c(measure, subject), values_from = value) %>%
   rename(
     annual_growth = AGRWTH_TOT, pop_men = MLN_PER_MEN,
@@ -59,9 +62,81 @@ paralympic_cleaned <- paralympic_data %>%
   #This creates a new country column
 ```
 
-The problem is even the country names aren’t the same. Let’s see which
-OECD countries—under these names—apparently haven’t won Paralympic
-medals in the time frame.
+One thing we can notice is that not all the countries in the
+`oecd_cleaned` data yet have a name. Let’s see which.
+
+``` r
+oecd_cleaned %>%
+  select(country, location) %>%
+  distinct() %>%
+  filter(is.na(country)) %>%
+  select(location)
+```
+
+    ## # A tibble: 4 × 1
+    ##   location
+    ##   <chr>   
+    ## 1 OECD    
+    ## 2 WLD     
+    ## 3 G20     
+    ## 4 EU27
+
+Seems like the remaining values are overall figures for the OECD, the
+world, the [G20](https://en.wikipedia.org/wiki/G20) and for what is now
+the
+[EU27](https://en.wikipedia.org/wiki/Member_state_of_the_European_Union).
+We’ll add names, so that it doesn’t get confused later with events that
+don’t have a country name in the Paralympic data.
+
+``` r
+oecd_cleaned <- oecd_cleaned %>%
+  mutate(
+    country = case_when(
+      location == "OECD" ~ "Organisation for Economic Co-operation and Development",
+      location == "WLD"  ~ "World",
+      location == "G20"  ~ "Group of 20",
+      location == "EU27" ~ "European Union"
+    )
+  )
+```
+
+It might also be useful to know what fraction of the world population
+each country represented at each year. Let’s do that.
+
+``` r
+#First get the world data out...
+world_pop <- oecd_cleaned %>%
+  filter(location == "WLD") %>%
+  select(time, pop_total, pop_men, pop_women) %>%
+  rename(
+    world_pop_total = pop_total,
+    world_pop_men = pop_men,
+    world_pop_women = pop_women
+  )
+
+#... then add it back in using a join
+oecd_cleaned <- oecd_cleaned %>%
+  left_join(world_pop, by = "time") %>%
+  mutate(
+    frac_men = pop_men/world_pop_men,
+    frac_women = pop_women/world_pop_women,
+    frac_total = pop_total/world_pop_total
+  ) %>%
+  select(-c(world_pop_total, world_pop_men, world_pop_women))
+
+#We could have achieved this all in one pipeline using a `right_join`, but this
+#is hopefully easier to follow!
+```
+
+💡 *This is a useful general technique for moving summary data that’s
+been stored in its own rows, into a new column attached to all the rows
+to which it relates. Could you work out how to do the same so that, for
+the EU countries in the OECD, the proportion of the EU population which
+they represent is shown?* 💡
+
+A problem remains for joining the data, though: even the country names
+aren’t entirely the same. Let’s see which OECD countries—under these
+names—apparently haven’t won Paralympic medals in the time frame.
 
 ``` r
 paralympic_oecd_table <- paralympic_cleaned %>%
@@ -78,17 +153,13 @@ oecd_countries %>%
   filter(is.na(n_para))
 ```
 
-    ## # A tibble: 8 × 2
-    ##   country                                              n_para
-    ##   <chr>                                                 <int>
-    ## 1 Czechia                                                  NA
-    ## 2 Korea, Republic of                                       NA
-    ## 3 United Kingdom of Great Britain and Northern Ireland     NA
-    ## 4 United States of America                                 NA
-    ## 5 Russian Federation                                       NA
-    ## 6 Costa Rica                                               NA
-    ## 7 Malta                                                    NA
-    ## 8 Romania                                                  NA
+    ## # A tibble: 4 × 2
+    ##   country                                                n_para
+    ##   <chr>                                                   <int>
+    ## 1 Organisation for Economic Co-operation and Development     NA
+    ## 2 World                                                      NA
+    ## 3 Group of 20                                                NA
+    ## 4 European Union                                             NA
 
 ``` r
   #If the count is NA, that means it didn't appear in the dataset that was
@@ -138,7 +209,6 @@ about joining data frames that’s what I would have done!
 oecd_cleaned <- oecd_data %>%
   clean_names() %>%
   select(-c(flag_codes, indicator, frequency)) %>%
-  #mutate(measure = tolower(measure), subject = tolower(subject)) %>%
   pivot_wider(names_from = c(measure, subject), values_from = value) %>%
   rename(
     annual_growth = AGRWTH_TOT, pop_men = MLN_PER_MEN,
@@ -146,15 +216,37 @@ oecd_cleaned <- oecd_data %>%
   ) %>%
   left_join(ISO_lookup, by = c("location" = "ISO_code")) %>%
   mutate(
-    country = case_when(
-      country == "Czechia"                                              ~ "Czech Republic",
-      country == "Korea, Republic of"                                   ~ "South Korea",
-      country == "United Kingdom of Great Britain and Northern Ireland" ~ "Great Britain",
-      country == "United States of America"                             ~ "United States",
-      country == "Russian Federation"                                   ~ "Russia",
-      TRUE                                                              ~ country #Other cases
+    country = case_when( #Combining into one case_when
+      location == "OECD" ~ "Organisation for Economic Co-operation and Development",
+      location == "WLD"  ~ "World",
+      location == "G20"  ~ "Group of 20",
+      location == "EU27" ~ "European Union",
+      location == "CZE"  ~ "Czech Republic", #Might as well use codes for all of it!
+      location == "KOR"  ~ "South Korea",
+      location == "GBR"  ~ "Great Britain",
+      location == "USA"  ~ "United States",
+      location == "RUS"  ~ "Russia",
+      TRUE               ~ country #Other cases
     )
   )
+
+world_pop <- oecd_cleaned %>%
+  filter(location == "WLD") %>%
+  select(time, pop_total, pop_men, pop_women) %>%
+  rename(
+    world_pop_total = pop_total,
+    world_pop_men = pop_men,
+    world_pop_women = pop_women
+  )
+
+oecd_cleaned <- oecd_cleaned %>%
+  left_join(world_pop, by = "time") %>%
+  mutate(
+    frac_men = pop_men/world_pop_men,
+    frac_women = pop_women/world_pop_women,
+    frac_total = pop_total/world_pop_total
+  ) %>%
+  select(-c(world_pop_total, world_pop_men, world_pop_women))
 
 paralympic_full <- paralympic_data %>%
   select(-country) %>%
@@ -167,6 +259,55 @@ The columns are in a different order from what we got the first time
 around, but it’s otherwise the same data frame. (Notice this only works
 because we never overwrote the originally loaded data frames after
 loading them. If we had we’d have to load them again.)
+
+## Analysis
+
+Let’s see if there’s any link between winning medals in a sport and the
+population of your country. The sport appears to be contained in the
+`type` variable.
+
+``` r
+paralympic_full %>% count(type)
+```
+
+    ## # A tibble: 11 × 2
+    ##    type                  n
+    ##    <chr>             <int>
+    ##  1 Archery             416
+    ##  2 Athletics          7741
+    ##  3 Basketball          594
+    ##  4 Fencing             670
+    ##  5 Powerlifting        403
+    ##  6 Rugby               176
+    ##  7 Swimming           6233
+    ##  8 Table Tennis       1393
+    ##  9 Triathlon            18
+    ## 10 Volleyball          575
+    ## 11 Wheelchair Tennis  1370
+
+We’ll use the fraction of the world population for people of a given
+(binary) gender [4] as a variable to standardise by. This is going to
+take some manipulation.
+
+``` r
+paralympic_full <- paralympic_full %>%
+  mutate(
+    frac_for_gender = case_when(
+      gender == "Men"   ~ frac_men,
+      gender == "Women" ~ frac_women,
+      TRUE              ~ frac_total #Fallback if gender field is missing
+    )
+  )
+
+paralympic_full %>%
+  ggplot(aes(x = type, y = frac_for_gender)) +
+  geom_violin()
+```
+
+![](paralympics_files/figure-gfm/sport%20v%20population-1.png)<!-- -->
+
+This gives a warning that values were removed (hidden in the knitted
+document), because we only have the data for the OECD countries.
 
 [1] OECD (2021), Population (indicator). doi:
 [10.1787/d434f82b-en](https://doi.org/10.1787/d434f82b-en) (Accessed on
@@ -182,3 +323,9 @@ October 2021.
 UK in most other contexts. I don’t like it either, but it’s pretty
 standard (the UK Paralympic team calls itself “ParalympicsGB”), so
 you’ll have to take it up with the IOC!
+
+[4] Some people are non-binary, of course, and so don’t fit into either
+of these categories. The statistics from the OECD don’t reflect that,
+much as the Census 2021 in England and Wales asked for respondents to
+state a binary sex as well as giving a free text box to state their
+gender. In Paralympic sports there are only two gender categories.
