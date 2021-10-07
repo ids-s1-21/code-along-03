@@ -9,13 +9,14 @@ editor_options:
 
 ```{r load-packages, message = FALSE}
 library(tidyverse)
+library(janitor)
 ```
 
 ## Read data
 The primary data are drawn from the "Tidy Tuesday" project: [2021 Week 32: Paralympics](https://github.com/rfordatascience/tidytuesday/blob/master/data/2021/2021-08-03/readme.md) (credit: [International Paralympic Committee](https://db.ipc-services.org/sdms/hira/web/index)).  The secondary data are from the Organisation for Economic Co-operation and Development ^[OECD (2021), Population (indicator). doi: [10.1787/d434f82b-en](https://doi.org/10.1787/d434f82b-en) (Accessed on 06 October 2021)].  The lookup tables were scraped by me from Wikipedia ^[[List of IOC country codes](https://en.wikipedia.org/wiki/List_of_IOC_country_codes) and [ISO 3166-1](https://en.wikipedia.org/wiki/ISO_3166-1).  Scraped on 6th October 2021.]
 
 ```{r read-data, message = FALSE}
-paralympic_data <-read_csv(
+paralympic_data <- read_csv(
   "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-08-03/athletes.csv"
 )
 
@@ -24,5 +25,48 @@ ISO_lookup <- readRDS("data/ISO_lookup.rds")
 IOC_lookup <- readRDS("data/IOC_lookup.rds")
 ```
 
-The rest of this document will be filled in during Thursday's live coding session.
+Cleaning up data
+
+```{r cleanup}
+oecd_cleaned <- oecd_data %>%
+  clean_names() %>%
+  select(-c(flag_codes, indicator, frequency)) %>%
+  #mutate(measure = tolower(measure), subject = tolower(subject)) %>%
+  pivot_wider(names_from = c(measure, subject), values_from = value) %>%
+  rename(
+    annual_growth = AGRWTH_TOT, pop_men = MLN_PER_MEN,
+    pop_women = MLN_PER_WOMEN, pop_total = MLN_PER_TOT
+  ) %>%
+  left_join(ISO_lookup, by = c("location" = "ISO_code")) #%>%
+  # mutate(
+  #   case_when
+  # )
+
+oecd_table <- oecd_cleaned %>%
+  count(country)
+```
+
+```{r pipes}
+oecd_data %>%
+  clean_names() %>%
+  select(-c(flag_codes, indicator, frequency))
+
+temp <- clean_names(oecd_data)
+temp <- select(temp, -c(flag_codes, indicator, frequency))
+```
+
+```{r join}
+paralympic_oecd <- paralympic_data %>%
+  select(-country) %>%
+  left_join(IOC_lookup, by = c("abb" = "IOC_code")) %>%
+  inner_join(oecd_cleaned, by = c("country", "year" = "time"))
+  
+paralympic_table <- paralympic_oecd %>%
+  count(country) %>%
+  rename(n.para = n)
+
+oecd_table %>%
+  full_join(paralympic_table, by = "country") %>%
+  filter(is.na(n.para))
+```
 
