@@ -10,6 +10,8 @@ library(janitor)
 #installed you'll get an error: try running
 # install.packages("janitor")
 #in the console, then knitting again.
+library(scales)
+library(RColorBrewer)
 
 #To install the "emo" package (also necessary to knit this) run:
 # devtools::install_github("hadley/emo")
@@ -73,7 +75,7 @@ oecd_cleaned %>%
   select(location)
 ```
 
-    ## # A tibble: 4 × 1
+    ## # A tibble: 4 x 1
     ##   location
     ##   <chr>   
     ## 1 OECD    
@@ -101,7 +103,8 @@ oecd_cleaned <- oecd_cleaned %>%
 ```
 
 It might also be useful to know what fraction of the world population
-each country represented at each year. Let’s do that.
+each country represented at each year, since it allows us to control for
+a growing world population. Let’s do that.
 
 ``` r
 #First get the world data out...
@@ -153,7 +156,7 @@ oecd_countries %>%
   filter(is.na(n_para))
 ```
 
-    ## # A tibble: 4 × 2
+    ## # A tibble: 4 x 2
     ##   country                                                n_para
     ##   <chr>                                                   <int>
     ## 1 Organisation for Economic Co-operation and Development     NA
@@ -270,7 +273,7 @@ population of your country. The sport appears to be contained in the
 paralympic_full %>% count(type)
 ```
 
-    ## # A tibble: 11 × 2
+    ## # A tibble: 11 x 2
     ##    type                  n
     ##    <chr>             <int>
     ##  1 Archery             416
@@ -307,7 +310,242 @@ paralympic_full %>%
 ![](paralympics_files/figure-gfm/sport%20v%20population-1.png)<!-- -->
 
 This gives a warning that values were removed (hidden in the knitted
-document), because we only have the data for the OECD countries.
+document), because we only have the data for the OECD countries. Also
+our violin plots have some very high values, which makes them hard to
+read. We could rescale the axis to be logarithmic…
+
+``` r
+paralympic_full %>%
+  ggplot(aes(x = type, y = frac_for_gender)) +
+  geom_violin() +
+  scale_y_log10()
+```
+
+![](paralympics_files/figure-gfm/log%20violin-1.png)<!-- -->
+
+… though it is quite possible then that the density is no longer
+accurate given a log-transformation.
+
+What if we look at years?
+
+``` r
+paralympic_full %>%
+  ggplot(aes(x = year, y = frac_for_gender)) +
+  geom_jitter(aes(colour = type))
+```
+
+    ## Warning: Removed 3066 rows containing missing values (geom_point).
+
+![](paralympics_files/figure-gfm/years-1.png)<!-- -->
+
+But the problem with this is that we have too many observations the
+same.
+
+``` r
+paralympic_full %>%
+  select(year, frac_for_gender, country) %>%
+  distinct() %>%
+  ggplot(aes(x = year, y = frac_for_gender)) +
+  geom_point(aes(colour = country)) +
+  geom_text(
+    aes(label = country),
+    nudge_y = 0.005,
+    check_overlap = TRUE
+  )
+```
+
+    ## Warning: Removed 236 rows containing missing values (geom_point).
+
+    ## Warning: Removed 236 rows containing missing values (geom_text).
+
+![](paralympics_files/figure-gfm/us-1.png)<!-- -->
+
+Okay, let’s try something else! For each of the OECD countries, let’s
+calculate the number of gold, silver and bronze medals they had. First,
+we’ll need to modify the `medal` variable, because this has a natural
+order that we need to reflect: Gold \> Silver \> Bronze.
+
+``` r
+paralympic_full <- paralympic_full %>%
+  mutate(
+    medal = factor(
+      medal,
+      ordered = TRUE,
+      levels = c("Bronze", "Silver", "Gold")
+    )
+  )
+
+paralympic_full %>%
+  filter(!is.na(pop_total)) %>% #Removes non-OECD countries
+  ggplot(aes(y = country, fill = medal)) +
+  geom_bar()
+```
+
+![](paralympics_files/figure-gfm/medal-colour-1.png)<!-- -->
+
+This would look better sorted by which country has the most medals (for
+which we’ll need to count them before plotting), and with the medals
+shown with their correct colours! Maybe gold medals should go at the
+right as well.
+
+``` r
+paralympic_full <- paralympic_full %>%
+  mutate(
+    country = fct_rev(fct_infreq(country)), #countries in order
+    medal = fct_rev(medal) #medals in reverse order
+  ) 
+
+paralympic_full %>%
+  filter(!is.na(pop_total)) %>% #Removes non-OECD countries
+  ggplot(aes(y = country, fill = medal)) +
+  geom_bar() +
+  labs(
+    x = "Number of medals",
+    y = "Country",
+    fill = "Medal type",
+    title = "The US has won the most Paralympic medals of the OECD",
+    caption = "Source: IPC/OECD"
+  ) +
+  scale_fill_manual(values = c("#D4AF37", "#C0C0C0", "#CD7F32")) +
+  theme_minimal()
+```
+
+![](paralympics_files/figure-gfm/medal-colour-2-1.png)<!-- -->
+
+💡 *There are a lot of countries, some with values too small to see
+(which is also causing the bars to bunch together). How could we change
+this to have an “other” row? (Look into the function `fct_lump`.)* 💡
+
+Okay, let’s try one more thing: number of medals per unit population.
+We’ll divide the medal count for each year by *that year’s* population.
+
+``` r
+paralympic_full %>% 
+  filter(!is.na(pop_total)) %>%
+  count(country, medal, year, pop_total) %>%
+  mutate(medals_per_capita = n/pop_total) %>%
+  mutate(country = fct_reorder(country, medals_per_capita, sum)) %>%
+  ggplot(aes(x = medals_per_capita, y = country, fill = medal)) +
+  geom_col() +
+  labs(
+    x = "Number of medals",
+    y = "Country",
+    fill = "Medal type",
+    title = "Iceland punches above its weight..",
+    subtitle = "... with the rest of Scandinavia not far behind in rank",
+    caption = "Source: IPC/OECD"
+  ) +
+  scale_fill_manual(values = c("#D4AF37", "#C0C0C0", "#CD7F32")) +
+  theme_minimal()
+```
+
+![](paralympics_files/figure-gfm/medals-per-capita-1.png)<!-- -->
+
+💡 *Remember this is only showing OECD countries: we don’t have the
+population data for the others at present. Is there anything we could do
+about this?* 💡
+
+Finally, let’s try and see which sports the Scandinavian countries are
+good at.
+
+``` r
+scandi_sports <- paralympic_full %>%
+  mutate(type = factor(type)) %>%
+  #Make sure we don't lose any sports, even if no medals were won
+  filter(country %in% c("Iceland", "Sweden", "Norway", "Denmark", "Finland")) %>%
+  count(country, type) %>%
+  mutate(country = fct_drop(country)) #Drop non-Scandi countries from the factor
+
+scandi_sports %>%
+  complete(country, type, fill = list(n = 0)) %>%
+  pivot_wider(names_from = country, values_from = n) %>%
+  rename(sport = type)
+```
+
+    ## # A tibble: 11 x 6
+    ##    sport             Iceland Finland Norway Denmark Sweden
+    ##    <fct>               <dbl>   <dbl>  <dbl>   <dbl>  <dbl>
+    ##  1 Archery                 0      15      5       4     10
+    ##  2 Athletics              12     123     72      76    117
+    ##  3 Basketball              0       0      0       0     12
+    ##  4 Fencing                 0       0      0       0      0
+    ##  5 Powerlifting            0       2      3       0      7
+    ##  6 Rugby                   0       0      0       0      0
+    ##  7 Swimming               49      37    132     144    243
+    ##  8 Table Tennis            1      21     13      22     75
+    ##  9 Triathlon               0       0      0       0      0
+    ## 10 Volleyball              0      23     20       0      2
+    ## 11 Wheelchair Tennis       1      21     12      22     72
+
+Hmm, this is a little hard to interpret. Perhaps we need a chart again.
+
+``` r
+scandi_sports %>%
+  ggplot(aes(x = country, y = n, fill = type)) +
+  geom_col(position = "fill") +
+  labs(
+    x = "Country",
+    y = "Proportion of medals",
+    fill = "Sport",
+    title = "Q: Which sports are Scandi countries good at?",
+    caption = "Source: IPC/OECD"
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(
+    values = brewer.pal(
+      n = length(levels(scandi_sports$type)), name = "Paired"
+    ),
+    drop = FALSE
+  ) +
+  theme_minimal()
+```
+
+![](paralympics_files/figure-gfm/scandi-bar-1.png)<!-- -->
+
+Swimming and athletics, apparently. But what if we add a column for all
+countries?
+
+``` r
+count_all <- paralympic_full %>%
+  mutate(type = factor(type)) %>%
+  count(type) %>%
+  mutate(country = "World")
+
+levels_store <- levels(scandi_sports$country)
+
+scandi_sports <- scandi_sports %>%
+  mutate(country = as.character(country)) %>%
+  bind_rows(count_all) %>%
+  mutate(country = factor(country)) %>%
+  mutate(country = fct_relevel(country, c(levels_store, "World")))
+
+scandi_sports %>%
+  ggplot(aes(x = country, y = n, fill = type)) +
+  geom_col(position = "fill") +
+  labs(
+    x = "Country",
+    y = "Proportion of medals",
+    fill = "Sport",
+    title = "A: The same as everyone else!",
+    caption = "Source: IPC/OECD"
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(
+    values = brewer.pal(
+      n = length(levels(scandi_sports$type)), name = "Paired"
+    ),
+    drop = FALSE
+  ) +
+  theme_minimal()
+```
+
+![](paralympics_files/figure-gfm/sports-all-1.png)<!-- -->
+
+We see that this isn’t really much different from the rest of the world!
+There are just a lot of medals available in these sports.
+
+💡 *How could we assess in which sports these countries are doing
+disproportionately well?* 💡
 
 [1] OECD (2021), Population (indicator). doi:
 [10.1787/d434f82b-en](https://doi.org/10.1787/d434f82b-en) (Accessed on
