@@ -339,17 +339,18 @@ paralympic_full %>%
 ![](paralympics_files/figure-gfm/years-1.png)<!-- -->
 
 But the problem with this is that we have too many observations the
-same.
+same, and what we’re really seeing at the top there are changes in one
+countries population.
 
 ``` r
 paralympic_full %>%
   select(year, frac_for_gender, country) %>%
   distinct() %>%
   ggplot(aes(x = year, y = frac_for_gender)) +
-  geom_point(aes(colour = country)) +
+  geom_point() +
   geom_text(
     aes(label = country),
-    nudge_y = 0.005,
+    nudge_y = 0.01,
     check_overlap = TRUE
   )
 ```
